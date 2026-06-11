@@ -1,0 +1,50 @@
+{
+  "name": "webhook-verify",
+  "version": "0.1.0",
+  "description": "Tiny typed HMAC webhook verifiers - raw-body (GitHub-style), timestamped with replay tolerance (Stripe-style), and URL+sorted-params (Twilio, Mandrill) - constant-time compares, zero dependencies.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "prepare": "npm run build",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "webhook",
+    "hmac",
+    "webhook-signature",
+    "signature-verification",
+    "timing-safe",
+    "replay-protection",
+    "twilio",
+    "mandrill",
+    "stripe",
+    "github-webhooks",
+    "security"
+  ],
+  "author": "Jacob Stephens",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JacobStephens2/webhook-verify.git"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}
