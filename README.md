@@ -16,8 +16,9 @@ both sides can reconstruct, a constant-time compare - in one of three dialects:
 
 Runs on Node 18+ (`node:crypto`). No dependencies. Extracted from webhook
 receivers I run in production - payment-settlement posts from a card
-processor, Mandrill message events, Twilio status callbacks, and
-service-to-service webhooks my own apps sign.
+processor, Mandrill message events, and service-to-service webhooks my own
+apps sign. The Twilio verifier is the same construction as Mandrill's with a
+different key, included for completeness.
 
 ## Install
 
