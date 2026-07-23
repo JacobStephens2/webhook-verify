@@ -1,5 +1,5 @@
 {
-  "name": "webhook-verify",
+  "name": "@stephenspage/webhook-verify",
   "version": "0.1.0",
   "description": "Tiny typed HMAC webhook verifiers - raw-body (GitHub-style), timestamped with replay tolerance (Stripe-style), and URL+sorted-params (Twilio, Mandrill) - constant-time compares, zero dependencies.",
   "type": "module",
@@ -38,9 +38,17 @@
   ],
   "author": "Jacob Stephens",
   "license": "MIT",
+  "homepage": "https://github.com/JacobStephens2/webhook-verify#readme",
+  "bugs": {
+    "url": "https://github.com/JacobStephens2/webhook-verify/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/JacobStephens2/webhook-verify.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

@@ -1,4 +1,10 @@
-# webhook-verify
+# @stephenspage/webhook-verify
+
+[![npm version](https://img.shields.io/npm/v/@stephenspage/webhook-verify.svg)](https://www.npmjs.com/package/@stephenspage/webhook-verify)
+[![npm downloads](https://img.shields.io/npm/dm/@stephenspage/webhook-verify.svg)](https://www.npmjs.com/package/@stephenspage/webhook-verify)
+[![CI](https://github.com/JacobStephens2/webhook-verify/actions/workflows/ci.yml/badge.svg)](https://github.com/JacobStephens2/webhook-verify/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/JacobStephens2/webhook-verify/badge)](https://scorecard.dev/viewer/?uri=github.com/JacobStephens2/webhook-verify)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 Tiny, dependency-free TypeScript verifiers for HMAC-signed webhooks. Every
 provider's scheme is the same primitive - a shared secret, an HMAC over bytes
@@ -26,7 +32,16 @@ this library, so the two produce byte-identical signatures.
 
 ## Install
 
-> **Not yet published to npm** - install from GitHub (a `prepare` hook builds it on install):
+```bash
+npm install @stephenspage/webhook-verify
+```
+
+Releases are published to npm via GitHub Actions with [OIDC Trusted
+Publishing](https://docs.npmjs.com/trusted-publishers/), so every version
+carries a signed provenance statement.
+
+If you prefer to install straight from GitHub (a `prepare` hook builds it on
+install):
 
 ```bash
 npm install github:JacobStephens2/webhook-verify
@@ -39,7 +54,7 @@ middleware that re-serializes JSON destroys the signing base - capture the
 raw body first.
 
 ```ts
-import { verifyGitHub } from 'webhook-verify';
+import { verifyGitHub } from '@stephenspage/webhook-verify';
 
 app.post('/webhooks/github', express.raw({ type: '*/*' }), (req, res) => {
   if (!verifyGitHub(req.body, req.get('X-Hub-Signature-256'), process.env.WEBHOOK_SECRET!)) {
@@ -56,7 +71,7 @@ without GitHub's `sha256=` prefix.
 ## Timestamped (Stripe-style), both directions
 
 ```ts
-import { signTimestamped, verifyTimestamped } from 'webhook-verify';
+import { signTimestamped, verifyTimestamped } from '@stephenspage/webhook-verify';
 
 // Producer - sign what you send:
 const header = signTimestamped(payload, secret, Math.floor(Date.now() / 1000));
@@ -83,7 +98,7 @@ something else; reconstruct the public URL from configuration, not from the
 request.
 
 ```ts
-import { verifyTwilio, verifyMandrill } from 'webhook-verify';
+import { verifyTwilio, verifyMandrill } from '@stephenspage/webhook-verify';
 
 verifyTwilio(
   'https://app.example.com/sms/status',   // public URL, as configured in Twilio
