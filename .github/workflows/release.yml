@@ -23,13 +23,19 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
           cache: npm
+
+      # Trusted Publishing requires npm >= 11.5.1. Node 24 ships with npm 11.x,
+      # but pin to the latest explicitly so a runner image change never breaks
+      # publishes.
+      - name: Ensure npm >= 11.5.1 for Trusted Publishing
+        run: npm install -g npm@latest
 
       - run: npm ci
       - run: npm test
