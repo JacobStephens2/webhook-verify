@@ -1,6 +1,6 @@
 {
   "name": "@stephenspage/webhook-verify",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Tiny typed HMAC webhook verifiers - raw-body (GitHub-style), timestamped with replay tolerance (Stripe-style), and URL+sorted-params (Twilio, Mandrill) - constant-time compares, zero dependencies.",
   "type": "module",
   "main": "./dist/index.js",
