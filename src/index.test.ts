@@ -9,6 +9,9 @@ import {
   verifyMandrill,
   verifyTimestamped,
   verifyTwilio,
+  verifyStripe,
+  constructStripeEvent,
+  WebhookSignatureError,
 } from './index.js';
 
 const SECRET = 'whsec_test_4f8a2b';
@@ -130,6 +133,48 @@ describe('signTimestamped / verifyTimestamped', () => {
     expect(verifyTimestamped(body, 'not-a-signature', SECRET, { nowSeconds: now })).toBe(false);
     expect(verifyTimestamped(body, 't=soon,v1=' + '0'.repeat(64), SECRET, { nowSeconds: now })).toBe(false);
     expect(verifyTimestamped(body, `t=${now}`, SECRET, { nowSeconds: now })).toBe(false);
+  });
+});
+
+describe('verifyStripe / constructStripeEvent', () => {
+  const body = '{"id":"evt_test","object":"event","type":"invoice.paid"}';
+  const now = 1_750_000_000;
+  // Stripe secrets look like this; the full string (including whsec_) is the HMAC key.
+  const stripeSecret = 'whsec_test_chart35_endpoint_secret';
+
+  it('verifyStripe accepts a Stripe-style header (alias of verifyTimestamped)', () => {
+    const header = signTimestamped(body, stripeSecret, now);
+    expect(verifyStripe(body, header, stripeSecret, { nowSeconds: now })).toBe(true);
+    expect(verifyStripe(Buffer.from(body, 'utf8'), header, stripeSecret, { nowSeconds: now })).toBe(true);
+  });
+
+  it('constructStripeEvent returns the parsed JSON on success', () => {
+    const header = signTimestamped(body, stripeSecret, now);
+    const event = constructStripeEvent(body, header, stripeSecret, { nowSeconds: now }) as {
+      id: string;
+      type: string;
+    };
+    expect(event.id).toBe('evt_test');
+    expect(event.type).toBe('invoice.paid');
+  });
+
+  it('constructStripeEvent throws WebhookSignatureError on bad signature', () => {
+    const header = signTimestamped(body, stripeSecret, now);
+    expect(() =>
+      constructStripeEvent(body, header, 'whsec_wrong', { nowSeconds: now }),
+    ).toThrow(WebhookSignatureError);
+    expect(() =>
+      constructStripeEvent(body, undefined, stripeSecret, { nowSeconds: now }),
+    ).toThrow(/Missing/);
+  });
+
+  it('constructStripeEvent rejects a re-serialized body (classic footgun)', () => {
+    const header = signTimestamped(body, stripeSecret, now);
+    // Pretty-print changes bytes → signature fails.
+    const reserialized = JSON.stringify(JSON.parse(body), null, 2);
+    expect(() =>
+      constructStripeEvent(reserialized, header, stripeSecret, { nowSeconds: now }),
+    ).toThrow(WebhookSignatureError);
   });
 });
 

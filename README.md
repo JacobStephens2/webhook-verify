@@ -110,6 +110,43 @@ if (!verifyTimestamped(rawBody, req.get('Webhook-Signature'), secret)) {
 Multiple `v1` entries in one header are accepted (sent during key rotation);
 any single match passes.
 
+### Stripe webhooks (verify without `constructEvent`)
+
+Stripe's `Stripe-Signature` header is exactly this dialect. The endpoint
+secret (`whsec_…`) is the HMAC key as a UTF-8 string - including the prefix,
+matching the Stripe SDKs. If you already depend on `stripe` for Checkout and
+the API but want signature checking in a tiny zero-dep package:
+
+```ts
+import {
+  constructStripeEvent,
+  WebhookSignatureError,
+} from '@stephenspage/webhook-verify';
+
+// Mount with express.raw BEFORE express.json so req.body is the raw Buffer.
+app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  try {
+    const event = constructStripeEvent(
+      req.body,
+      req.get('Stripe-Signature'),
+      process.env.STRIPE_WEBHOOK_SECRET!,
+    ) as import('stripe').Stripe.Event;
+    // handle event.type …
+    res.json({ received: true });
+  } catch (err) {
+    if (err instanceof WebhookSignatureError) {
+      return res.status(400).json({ error: 'Invalid signature' });
+    }
+    throw err;
+  }
+});
+```
+
+`verifyStripe` is the boolean form (same as `verifyTimestamped`). Use
+`constructStripeEvent` when you want parse-after-verify and throw-on-failure
+the way `stripe.webhooks.constructEvent` does. Typing the event as
+`Stripe.Event` and handling event types still uses the Stripe package.
+
 ## URL + sorted params (Twilio, Mandrill)
 
 The URL in the signature is the one the **provider** called - the public
