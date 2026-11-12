@@ -90,6 +90,18 @@ without GitHub's `sha256=` prefix.
 
 ## Timestamped (Stripe-style), both directions
 
+The [Timestamped signing base](./GLOSSARY.md#language) is the UTF-8 encoding
+of the existing numeric timestamp representation followed by a dot, then the
+body bytes. Buffers contribute their unmodified bytes; strings contribute
+their UTF-8 encoding. The shared private computation lives in
+[`src/timestamped-signing-base.ts`](./src/timestamped-signing-base.ts).
+
+This corrects previously lossy signatures for non-UTF-8 Buffers, which were
+decoded to replacement characters before signing or verification. Those
+signatures are intentionally no longer accepted for the original non-UTF-8
+bodies. Signatures for strings and valid UTF-8 Buffers are unchanged. Stripe
+verification inherits the same byte preservation.
+
 ```ts
 import { signTimestamped, verifyTimestamped } from '@stephenspage/webhook-verify';
 

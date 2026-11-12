@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { timestampedDigest } from './timestamped-signing-base.js';
 
 export type HmacAlgorithm = 'sha1' | 'sha256' | 'sha512';
 export type SignatureEncoding = 'hex' | 'base64';
@@ -87,8 +88,7 @@ export function signTimestamped(
   secret: string,
   timestampSeconds: number,
 ): string {
-  const body = typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
-  const signature = hmacDigest(`${timestampSeconds}.${body}`, secret, 'sha256', 'hex');
+  const signature = timestampedDigest(rawBody, secret, timestampSeconds);
   return `t=${timestampSeconds},v1=${signature}`;
 }
 
@@ -122,8 +122,7 @@ export function verifyTimestamped(
   }
   if (Math.abs(nowSeconds - timestamp) > toleranceSeconds) return false;
 
-  const body = typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
-  const expected = hmacDigest(`${timestamp}.${body}`, secret, 'sha256', 'hex');
+  const expected = timestampedDigest(rawBody, secret, timestamp);
   return candidates.some((candidate) => safeEqual(expected, candidate));
 }
 
