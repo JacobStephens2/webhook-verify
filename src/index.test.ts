@@ -118,12 +118,15 @@ describe('signTimestamped / verifyTimestamped', () => {
     expect(new Set(headers).size).toBe(3);
   });
 
-  it('verifies each independent Buffer header only against its exact body bytes', () => {
+  it.each([
+    { name: 'verifyTimestamped', verify: verifyTimestamped },
+    { name: 'verifyStripe', verify: verifyStripe },
+  ])('$name verifies each independent Buffer header only against its exact body bytes', ({ verify }) => {
     const bodies = ['80', '81', 'efbfbd'].map((hex) => Buffer.from(hex, 'hex'));
     for (const signedBody of bodies) {
       const header = independentTimestampedHeader(signedBody, SECRET, now);
       for (const receivedBody of bodies) {
-        expect(verifyTimestamped(receivedBody, header, SECRET, { nowSeconds: now }))
+        expect(verify(receivedBody, header, SECRET, { nowSeconds: now }))
           .toBe(receivedBody.equals(signedBody));
       }
     }
@@ -200,17 +203,6 @@ describe('verifyStripe / constructStripeEvent', () => {
   const now = 1_750_000_000;
   // Stripe secrets look like this; the full string (including whsec_) is the HMAC key.
   const stripeSecret = 'whsec_test_chart35_endpoint_secret';
-
-  it('verifyStripe authenticates exact Buffer bytes against independent headers', () => {
-    const bodies = ['80', '81', 'efbfbd'].map((hex) => Buffer.from(hex, 'hex'));
-    for (const signedBody of bodies) {
-      const header = independentTimestampedHeader(signedBody, stripeSecret, now);
-      for (const receivedBody of bodies) {
-        expect(verifyStripe(receivedBody, header, stripeSecret, { nowSeconds: now }))
-          .toBe(receivedBody.equals(signedBody));
-      }
-    }
-  });
 
   it('constructStripeEvent parses a JSON Buffer with an independent header', () => {
     const rawBody = Buffer.from('{"id":"evt_🚀","text":"Sébastien","nul":"\\u0000"}', 'utf8');
