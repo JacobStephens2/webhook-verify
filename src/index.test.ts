@@ -16,6 +16,19 @@ import {
 
 const SECRET = 'whsec_test_4f8a2b';
 
+function independentTimestampedHeader(
+  rawBody: string | Buffer,
+  secret: string,
+  timestamp: number,
+): string {
+  const signingBase = Buffer.concat([
+    Buffer.from(`${timestamp}.`, 'utf8'),
+    typeof rawBody === 'string' ? Buffer.from(rawBody, 'utf8') : rawBody,
+  ]);
+  const digest = createHmac('sha256', secret).update(signingBase).digest('hex');
+  return `t=${timestamp},v1=${digest}`;
+}
+
 describe('safeEqual', () => {
   it('matches equal strings', () => {
     expect(safeEqual('abc123', 'abc123')).toBe(true);
@@ -96,6 +109,52 @@ describe('signTimestamped / verifyTimestamped', () => {
   const body = '{"id":"evt_123","type":"charge.succeeded"}';
   const now = 1_750_000_000;
 
+  it('signs distinct Buffer bytes against independent HMAC vectors', () => {
+    const bodies = ['80', '81', 'efbfbd'].map((hex) => Buffer.from(hex, 'hex'));
+    const headers = bodies.map((rawBody) => signTimestamped(rawBody, SECRET, now));
+    const expected = bodies.map((rawBody) => independentTimestampedHeader(rawBody, SECRET, now));
+
+    expect(headers).toEqual(expected);
+    expect(new Set(headers).size).toBe(3);
+  });
+
+  it('verifies each independent Buffer header only against its exact body bytes', () => {
+    const bodies = ['80', '81', 'efbfbd'].map((hex) => Buffer.from(hex, 'hex'));
+    for (const signedBody of bodies) {
+      const header = independentTimestampedHeader(signedBody, SECRET, now);
+      for (const receivedBody of bodies) {
+        expect(verifyTimestamped(receivedBody, header, SECRET, { nowSeconds: now }))
+          .toBe(receivedBody.equals(signedBody));
+      }
+    }
+  });
+
+  it('rejects formerly lossy headers for non-UTF-8 bodies', () => {
+    for (const hex of ['80', '81']) {
+      const rawBody = Buffer.from(hex, 'hex');
+      const lossyHeader = independentTimestampedHeader(rawBody.toString('utf8'), SECRET, now);
+      expect(verifyTimestamped(rawBody, lossyHeader, SECRET, { nowSeconds: now })).toBe(false);
+    }
+  });
+
+  it.each(['', 'ASCII body', 'Sébastien — naïve 🚀', 'before\0after'])(
+    'preserves UTF-8 string and Buffer signatures for %j',
+    (rawBody) => {
+      const header = independentTimestampedHeader(rawBody, SECRET, now);
+      for (const input of [rawBody, Buffer.from(rawBody, 'utf8')]) {
+        expect(signTimestamped(input, SECRET, now)).toBe(header);
+        expect(verifyTimestamped(input, header, SECRET, { nowSeconds: now })).toBe(true);
+      }
+    },
+  );
+
+  it('keeps using the parsed numeric timestamp and the last timestamp field', () => {
+    const rawBody = Buffer.from('80', 'hex');
+    const header = independentTimestampedHeader(rawBody, SECRET, now)
+      .replace(`t=${now}`, 'ignored,t=0,t=1.75e9');
+    expect(verifyTimestamped(rawBody, header, SECRET, { nowSeconds: now })).toBe(true);
+  });
+
   it('round-trips within the tolerance window', () => {
     const header = signTimestamped(body, SECRET, now);
     expect(header).toMatch(/^t=\d+,v1=[0-9a-f]{64}$/);
@@ -141,6 +200,38 @@ describe('verifyStripe / constructStripeEvent', () => {
   const now = 1_750_000_000;
   // Stripe secrets look like this; the full string (including whsec_) is the HMAC key.
   const stripeSecret = 'whsec_test_chart35_endpoint_secret';
+
+  it('verifyStripe authenticates exact Buffer bytes against independent headers', () => {
+    const bodies = ['80', '81', 'efbfbd'].map((hex) => Buffer.from(hex, 'hex'));
+    for (const signedBody of bodies) {
+      const header = independentTimestampedHeader(signedBody, stripeSecret, now);
+      for (const receivedBody of bodies) {
+        expect(verifyStripe(receivedBody, header, stripeSecret, { nowSeconds: now }))
+          .toBe(receivedBody.equals(signedBody));
+      }
+    }
+  });
+
+  it('constructStripeEvent parses a JSON Buffer with an independent header', () => {
+    const rawBody = Buffer.from('{"id":"evt_🚀","text":"Sébastien","nul":"\\u0000"}', 'utf8');
+    const header = independentTimestampedHeader(rawBody, stripeSecret, now);
+    expect(constructStripeEvent(rawBody, header, stripeSecret, { nowSeconds: now }))
+      .toEqual({ id: 'evt_🚀', text: 'Sébastien', nul: '\0' });
+  });
+
+  it('constructStripeEvent verifies Buffer bytes before parsing and retains signature errors', () => {
+    const rawBody = Buffer.from('80', 'hex');
+    const header = independentTimestampedHeader(rawBody, stripeSecret, now);
+    const invalidSignature = () =>
+      constructStripeEvent(rawBody, header, 'whsec_wrong', { nowSeconds: now });
+    const invalidJson = () =>
+      constructStripeEvent(rawBody, header, stripeSecret, { nowSeconds: now });
+
+    expect(invalidSignature).toThrow(WebhookSignatureError);
+    expect(invalidSignature).toThrow('Invalid Stripe signature or timestamp outside tolerance');
+    expect(invalidJson).toThrow(WebhookSignatureError);
+    expect(invalidJson).toThrow('Webhook body is not valid JSON');
+  });
 
   it('verifyStripe accepts a Stripe-style header (alias of verifyTimestamped)', () => {
     const header = signTimestamped(body, stripeSecret, now);
