@@ -161,10 +161,10 @@ the way `stripe.webhooks.constructEvent` does. Typing the event as
 
 ## URL + sorted params (Twilio, Mandrill)
 
-The URL in the signature is the one the **provider** called - the public
-`https://` URL, query string included. Behind a reverse proxy your app sees
-something else; reconstruct the public URL from configuration, not from the
-request.
+The URL in the [URL + sorted params](./GLOSSARY.md#language) signature is the
+one the **provider** called - the public `https://` URL, query string included.
+Behind a reverse proxy your app sees something else; reconstruct the public
+URL from configuration, not from the request.
 
 ```ts
 import { verifyTwilio, verifyMandrill } from '@stephenspage/webhook-verify';

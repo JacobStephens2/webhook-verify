@@ -261,51 +261,141 @@ describe('verifyStripe / constructStripeEvent', () => {
   });
 });
 
-function twilioStyleSignature(url: string, params: Record<string, string>, key: string): string {
-  let data = url;
-  for (const k of Object.keys(params).sort()) data += k + params[k];
-  return createHmac('sha1', key).update(data).digest('base64');
-}
-
-describe('verifyTwilio', () => {
+describe.each([
+  { name: 'verifyTwilio', verify: verifyTwilio },
+  { name: 'verifyMandrill', verify: verifyMandrill },
+])('$name — URL + sorted params', ({ verify }) => {
   const url = 'https://app.example.com/sms/status?source=twilio';
   const params = { MessageSid: 'SM1234', MessageStatus: 'delivered', To: '+15551230000' };
-  const authToken = 'twilio-auth-token';
-  const header = twilioStyleSignature(url, params, authToken);
+  const secret = 'twilio-auth-token';
+  const signingBase = url + 'MessageSidSM1234MessageStatusdeliveredTo+15551230000';
+  const header = createHmac('sha1', secret).update(signingBase).digest('base64');
 
-  it('accepts a valid signature regardless of param insertion order', () => {
-    expect(verifyTwilio(url, params, header, authToken)).toBe(true);
-    const reordered = { To: '+15551230000', MessageStatus: 'delivered', MessageSid: 'SM1234' };
-    expect(verifyTwilio(url, reordered, header, authToken)).toBe(true);
+  it.each<{
+    name: string;
+    url: string;
+    params: Record<string, string>;
+    secret: string;
+    signingBase: string;
+  }>([
+    {
+      name: 'the Twilio status fixture',
+      url,
+      params,
+      secret,
+      signingBase,
+    },
+    {
+      name: 'the Twilio fixture with reversed insertion order',
+      url,
+      params: { To: '+15551230000', MessageStatus: 'delivered', MessageSid: 'SM1234' },
+      secret,
+      signingBase,
+    },
+    {
+      name: 'the Mandrill events fixture',
+      url: 'https://app.example.com/webhooks/mandrill',
+      params: { mandrill_events: '[{"event":"open","_id":"abc123"}]' },
+      secret: 'mandrill-webhook-key',
+      signingBase: 'https://app.example.com/webhooks/mandrillmandrill_events[{"event":"open","_id":"abc123"}]',
+    },
+    {
+      name: 'lexicographic key order including numeric-looking keys',
+      url,
+      params: { '2': 'two', '10': 'ten', a: 'lower', Z: 'upper' },
+      secret,
+      signingBase: url + '10ten2twoZupperalower',
+    },
+    {
+      name: 'an exact URL with query order and escaping preserved',
+      url: 'https://APP.example.com:443/a/../hook?z=%2f&a=hello+world&a=',
+      params: { value: 'a+b & c=%2F' },
+      secret,
+      signingBase: 'https://APP.example.com:443/a/../hook?z=%2f&a=hello+world&a=valuea+b & c=%2F',
+    },
+    {
+      name: 'UTF-8 keys and values',
+      url,
+      params: { 'é': 'Sébastien — naïve 🚀', a: '日本語' },
+      secret,
+      signingBase: url + 'a日本語éSébastien — naïve 🚀',
+    },
+    { name: 'empty params', url, params: {}, secret, signingBase: url },
+    {
+      name: 'empty keys and values without separators',
+      url,
+      params: { z: '', '': 'first', a: '' },
+      secret,
+      signingBase: url + 'firstaz',
+    },
+  ])('accepts $name', ({ url, params, secret, signingBase }) => {
+    const expectedHeader = createHmac('sha1', secret).update(signingBase).digest('base64');
+    expect(verify(url, params, expectedHeader, secret)).toBe(true);
   });
 
-  it('rejects a tampered param value', () => {
-    expect(verifyTwilio(url, { ...params, MessageStatus: 'failed' }, header, authToken)).toBe(false);
+  it('rejects a changed URL, including a changed or omitted query string', () => {
+    for (const changedUrl of [
+      'http://internal:8080/sms/status?source=twilio',
+      'https://app.example.com/sms/status?source=mandrill',
+      'https://app.example.com/sms/status',
+    ]) {
+      expect(verify(changedUrl, params, header, secret)).toBe(false);
+    }
   });
 
-  it('rejects a different URL (the proxy gotcha)', () => {
-    expect(verifyTwilio('http://internal:8080/sms/status?source=twilio', params, header, authToken)).toBe(false);
+  it('rejects a changed parameter', () => {
+    expect(verify(url, { ...params, MessageStatus: 'failed' }, header, secret)).toBe(false);
   });
 
-  it('rejects the wrong auth token and a missing header', () => {
-    expect(verifyTwilio(url, params, header, 'wrong-token')).toBe(false);
-    expect(verifyTwilio(url, params, undefined, authToken)).toBe(false);
-  });
-});
-
-describe('verifyMandrill', () => {
-  const url = 'https://app.example.com/webhooks/mandrill';
-  const params = { mandrill_events: '[{"event":"open","_id":"abc123"}]' };
-  const webhookKey = 'mandrill-webhook-key';
-  const header = twilioStyleSignature(url, params, webhookKey);
-
-  it('accepts a valid X-Mandrill-Signature', () => {
-    expect(verifyMandrill(url, params, header, webhookKey)).toBe(true);
+  it('rejects the wrong secret', () => {
+    expect(verify(url, params, header, 'wrong-secret')).toBe(false);
   });
 
-  it('rejects tampered events, the wrong key, and a missing header', () => {
-    expect(verifyMandrill(url, { mandrill_events: '[]' }, header, webhookKey)).toBe(false);
-    expect(verifyMandrill(url, params, header, 'wrong-key')).toBe(false);
-    expect(verifyMandrill(url, params, null, webhookKey)).toBe(false);
+  it.each([
+    'not-a-signature',
+    '!',
+    'A'.repeat(27) + '=',
+    header.slice(0, -1),
+    header + '\n',
+    ' ' + header,
+    header.toLowerCase(),
+  ])('rejects malformed, mismatching or noncanonical header %j', (invalidHeader) => {
+    expect(verify(url, params, invalidHeader, secret)).toBe(false);
+  });
+
+  it.each([undefined, null, ''])('rejects missing header %j before reading params', (missingHeader) => {
+    const unreadableParams = new Proxy({}, {
+      ownKeys() { throw new Error('Params must not be enumerated'); },
+      get() { throw new Error('Params must not be read'); },
+    });
+    expect(verify(url, unreadableParams, missingHeader, secret)).toBe(false);
+  });
+
+  it.each(['', ' secret with whitespace\n', 'clé🔑'])('uses the entire secret %j', (secret) => {
+    const expectedHeader = createHmac('sha1', secret).update(signingBase).digest('base64');
+    expect(verify(url, params, expectedHeader, secret)).toBe(true);
+  });
+
+  it('uses only own enumerable string keys without mutating params', () => {
+    const ownParams: Record<string, string> = Object.create({ inherited: 'ignored' });
+    ownParams.visible = 'included';
+    Object.defineProperty(ownParams, 'hidden', { value: 'ignored' });
+    Object.defineProperty(ownParams, Symbol('symbol'), { value: 'ignored', enumerable: true });
+    Object.freeze(ownParams);
+    const expectedHeader = createHmac('sha1', secret).update(url + 'visibleincluded').digest('base64');
+    expect(verify(url, ownParams, expectedHeader, secret)).toBe(true);
+    expect(Object.keys(ownParams)).toEqual(['visible']);
+    expect(ownParams.visible).toBe('included');
+  });
+
+  it('reads each parameter value once in sorted key order', () => {
+    const reads: string[] = [];
+    const accessorParams = {
+      get b() { reads.push('b'); return 'second'; },
+      get a() { reads.push('a'); return 'first'; },
+    };
+    const expectedHeader = createHmac('sha1', secret).update(url + 'afirstbsecond').digest('base64');
+    expect(verify(url, accessorParams, expectedHeader, secret)).toBe(true);
+    expect(reads).toEqual(['a', 'b']);
   });
 });
