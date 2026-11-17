@@ -81,13 +81,17 @@ export function verifyGitHub(
 /**
  * Timestamped dialect, producer side: Stripe-style `t=<unix>,v1=<hex>`
  * where the signed payload is `"<t>.<rawBody>"`. The timestamp is what
- * gives the receiver a replay defense.
+ * gives the receiver a replay defense. Throws an {@link Error} if
+ * `timestampSeconds` is not an integer.
  */
 export function signTimestamped(
   rawBody: string | Buffer,
   secret: string,
   timestampSeconds: number,
 ): string {
+  if (!Number.isInteger(timestampSeconds)) {
+    throw new Error('timestampSeconds must be an integer');
+  }
   const signature = timestampedDigest(rawBody, secret, timestampSeconds);
   return `t=${timestampSeconds},v1=${signature}`;
 }
@@ -95,7 +99,8 @@ export function signTimestamped(
 /**
  * Timestamped dialect, receiver side. Accepts multiple `v1` entries in one
  * header (sent during key rotation); any single match passes. Rejects
- * timestamps outside the tolerance window in either direction.
+ * non-integer timestamps and timestamps outside the tolerance window in either
+ * direction.
  */
 export function verifyTimestamped(
   rawBody: string | Buffer,
@@ -117,7 +122,7 @@ export function verifyTimestamped(
     if (key === 't') timestamp = Number(value);
     else if (key === 'v1') candidates.push(value);
   }
-  if (timestamp === undefined || !Number.isFinite(timestamp) || candidates.length === 0) {
+  if (timestamp === undefined || !Number.isInteger(timestamp) || candidates.length === 0) {
     return false;
   }
   if (Math.abs(nowSeconds - timestamp) > toleranceSeconds) return false;
