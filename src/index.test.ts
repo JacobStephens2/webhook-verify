@@ -20,13 +20,26 @@ function independentTimestampedHeader(
   rawBody: string | Buffer,
   secret: string,
   timestamp: number,
+  headerTimestamp = String(timestamp),
 ): string {
   const signingBase = Buffer.concat([
     Buffer.from(`${timestamp}.`, 'utf8'),
     typeof rawBody === 'string' ? Buffer.from(rawBody, 'utf8') : rawBody,
   ]);
   const digest = createHmac('sha256', secret).update(signingBase).digest('hex');
-  return `t=${timestamp},v1=${digest}`;
+  return `t=${headerTimestamp},v1=${digest}`;
+}
+
+function nonIntegerTimestampedHeaders(
+  rawBody: string | Buffer,
+  secret: string,
+  baseTimestamp: number,
+): string[] {
+  const fractional = baseTimestamp + 0.5;
+  return [
+    independentTimestampedHeader(rawBody, secret, fractional),
+    independentTimestampedHeader(rawBody, secret, fractional, fractional.toExponential()),
+  ];
 }
 
 describe('safeEqual', () => {
@@ -118,6 +131,13 @@ describe('signTimestamped / verifyTimestamped', () => {
     expect(new Set(headers).size).toBe(3);
   });
 
+  it.each([now + 0.5, -1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'signTimestamped rejects non-integer timestampSeconds %s',
+    (invalidTimestamp) => {
+      expect(() => signTimestamped(body, SECRET, invalidTimestamp)).toThrow(Error);
+    },
+  );
+
   it.each([
     { name: 'verifyTimestamped', verify: verifyTimestamped },
     { name: 'verifyStripe', verify: verifyStripe },
@@ -156,6 +176,17 @@ describe('signTimestamped / verifyTimestamped', () => {
     const header = independentTimestampedHeader(rawBody, SECRET, now)
       .replace(`t=${now}`, 'ignored,t=0,t=1.75e9');
     expect(verifyTimestamped(rawBody, header, SECRET, { nowSeconds: now })).toBe(true);
+  });
+
+  it.each([
+    { name: 'verifyTimestamped', verify: verifyTimestamped },
+    { name: 'verifyStripe', verify: verifyStripe },
+  ])('$name rejects non-integer timestamps even with a valid signature', ({ verify }) => {
+    for (const header of nonIntegerTimestampedHeaders(body, SECRET, now)) {
+      expect(verify(body, header, SECRET, { nowSeconds: now })).toBe(false);
+    }
+    expect(verify(body, independentTimestampedHeader(body, SECRET, Number.NaN), SECRET, { nowSeconds: now })).toBe(false);
+    expect(verify(body, independentTimestampedHeader(body, SECRET, Number.POSITIVE_INFINITY), SECRET, { nowSeconds: now, toleranceSeconds: Infinity })).toBe(false);
   });
 
   it('round-trips within the tolerance window', () => {
@@ -258,6 +289,14 @@ describe('verifyStripe / constructStripeEvent', () => {
     expect(() =>
       constructStripeEvent(reserialized, header, stripeSecret, { nowSeconds: now }),
     ).toThrow(WebhookSignatureError);
+  });
+
+  it('constructStripeEvent throws WebhookSignatureError for non-integer timestamps', () => {
+    for (const header of nonIntegerTimestampedHeaders(body, stripeSecret, now)) {
+      const attempt = () => constructStripeEvent(body, header, stripeSecret, { nowSeconds: now });
+      expect(attempt).toThrow(WebhookSignatureError);
+      expect(attempt).toThrow('Invalid Stripe signature or timestamp outside tolerance');
+    }
   });
 });
 
