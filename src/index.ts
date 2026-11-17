@@ -187,15 +187,23 @@ export function constructStripeEvent(
 }
 
 /**
- * The base both Twilio and Mandrill sign: the public webhook URL with every
- * POST param appended in key order, as `key` then `value`, no separators.
+ * URL + sorted params verification: HMAC-SHA1/base64 over the exact public
+ * URL followed by each own enumerable param's key and value in default
+ * JavaScript lexicographic key order, without separators.
  */
-function urlParamsBase(url: string, params: Record<string, string>): string {
+function verifyUrlParams(
+  url: string,
+  params: Record<string, string>,
+  header: string | null | undefined,
+  secret: string,
+): boolean {
+  if (!header) return false;
   let data = url;
   for (const key of Object.keys(params).sort()) {
     data += key + params[key];
   }
-  return data;
+  const expected = hmacDigest(data, secret, 'sha1', 'base64');
+  return safeEqual(expected, header);
 }
 
 /**
@@ -210,9 +218,7 @@ export function verifyTwilio(
   header: string | null | undefined,
   authToken: string,
 ): boolean {
-  if (!header) return false;
-  const expected = hmacDigest(urlParamsBase(url, params), authToken, 'sha1', 'base64');
-  return safeEqual(expected, header);
+  return verifyUrlParams(url, params, header, authToken);
 }
 
 /**
@@ -226,7 +232,5 @@ export function verifyMandrill(
   header: string | null | undefined,
   webhookKey: string,
 ): boolean {
-  if (!header) return false;
-  const expected = hmacDigest(urlParamsBase(url, params), webhookKey, 'sha1', 'base64');
-  return safeEqual(expected, header);
+  return verifyUrlParams(url, params, header, webhookKey);
 }
