@@ -45,11 +45,13 @@ function assessTimestamped(
   header: string | null | undefined,
   secret: string,
   options: TimestampedVerifyOptions,
-  whitespaceOnly: 'missing' | 'rejected',
+  whitespaceOnlyHeaderPolicy: 'treat-as-missing' | 'check-as-present',
 ): TimestampedAssessment {
   if (
     !header ||
-    (whitespaceOnly === 'missing' && typeof header === 'string' && header.trim() === '')
+    (whitespaceOnlyHeaderPolicy === 'treat-as-missing' &&
+      typeof header === 'string' &&
+      header.trim() === '')
   ) {
     return 'missing';
   }
@@ -87,7 +89,7 @@ export function verifyTimestamped(
   secret: string,
   options: TimestampedVerifyOptions = {},
 ): boolean {
-  return assessTimestamped(rawBody, header, secret, options, 'rejected') === 'verified';
+  return assessTimestamped(rawBody, header, secret, options, 'check-as-present') === 'verified';
 }
 
 /**
@@ -134,7 +136,7 @@ export function constructStripeEvent(
   secret: string,
   options: TimestampedVerifyOptions = {},
 ): unknown {
-  const assessment = assessTimestamped(rawBody, header, secret, options, 'missing');
+  const assessment = assessTimestamped(rawBody, header, secret, options, 'treat-as-missing');
   if (assessment === 'missing') {
     throw new WebhookSignatureError('Missing Stripe-Signature header');
   }
