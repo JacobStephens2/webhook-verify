@@ -4,6 +4,11 @@ The shared language for authenticating webhook requests.
 
 ## Language
 
+**Timestamped webhook**:
+A webhook authenticated by a header carrying a timestamp used to check
+freshness and one or more `v1` digest candidates computed from the Timestamped
+signing base.
+
 **Timestamped signing base**:
 The UTF-8 encoding of the existing numeric timestamp representation followed
 by a dot, then the unmodified Buffer body or UTF-8-encoded string body.

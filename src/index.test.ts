@@ -221,11 +221,54 @@ describe('signTimestamped / verifyTimestamped', () => {
     expect(verifyTimestamped(body, header, SECRET, { nowSeconds: now })).toBe(false);
   });
 
-  it('rejects malformed and missing headers', () => {
-    expect(verifyTimestamped(body, undefined, SECRET, { nowSeconds: now })).toBe(false);
+  it('rejects malformed headers', () => {
     expect(verifyTimestamped(body, 'not-a-signature', SECRET, { nowSeconds: now })).toBe(false);
     expect(verifyTimestamped(body, 't=soon,v1=' + '0'.repeat(64), SECRET, { nowSeconds: now })).toBe(false);
     expect(verifyTimestamped(body, `t=${now}`, SECRET, { nowSeconds: now })).toBe(false);
+  });
+});
+
+describe('Timestamped webhook header handling', () => {
+  const body = '{"id":"evt_test"}';
+  const headers = [
+    { name: 'undefined', header: undefined, booleanOptionReads: [] },
+    { name: 'null', header: null, booleanOptionReads: [] },
+    { name: 'empty', header: '', booleanOptionReads: [] },
+    { name: 'whitespace-only', header: ' \t\r\n', booleanOptionReads: ['toleranceSeconds', 'nowSeconds'] },
+  ];
+
+  function observeOptionReads() {
+    const reads: string[] = [];
+    const options = {
+      get toleranceSeconds() {
+        reads.push('toleranceSeconds');
+        return 300;
+      },
+      get nowSeconds() {
+        reads.push('nowSeconds');
+        return 1_750_000_000;
+      },
+    };
+    return { options, reads };
+  }
+
+  describe.each([
+    { name: 'verifyTimestamped', verify: verifyTimestamped },
+    { name: 'verifyStripe', verify: verifyStripe },
+  ])('$name', ({ verify }) => {
+    it.each(headers)('returns false for a $name header with the expected option reads', ({ header, booleanOptionReads }) => {
+      const { options, reads } = observeOptionReads();
+      expect(verify(body, header, SECRET, options)).toBe(false);
+      expect(reads).toEqual(booleanOptionReads);
+    });
+  });
+
+  it.each(headers)('constructStripeEvent reports a $name header as missing before reading options', ({ header }) => {
+    const { options, reads } = observeOptionReads();
+    const construct = () => constructStripeEvent(body, header, SECRET, options);
+    expect(construct).toThrow(WebhookSignatureError);
+    expect(construct).toThrow(/^Missing Stripe-Signature header$/);
+    expect(reads).toEqual([]);
   });
 });
 
@@ -277,9 +320,6 @@ describe('verifyStripe / constructStripeEvent', () => {
     expect(() =>
       constructStripeEvent(body, header, 'whsec_wrong', { nowSeconds: now }),
     ).toThrow(WebhookSignatureError);
-    expect(() =>
-      constructStripeEvent(body, undefined, stripeSecret, { nowSeconds: now }),
-    ).toThrow(/Missing/);
   });
 
   it('constructStripeEvent rejects a re-serialized body (classic footgun)', () => {
