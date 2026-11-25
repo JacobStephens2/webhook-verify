@@ -39,7 +39,9 @@ export function signTimestamped(
   if (!Number.isInteger(timestampSeconds)) {
     throw new Error('timestampSeconds must be an integer');
   }
-  const timestamp = String(timestampSeconds);
+  // String(n) is exponential from 1e21 up. The signing base needs the
+  // canonical decimal of that integer.
+  const timestamp = BigInt(timestampSeconds).toString();
   const signature = timestampedDigest(rawBody, secret, timestamp);
   return `t=${timestamp},v1=${signature}`;
 }
@@ -70,9 +72,10 @@ function assessTimestamped(
     const eq = part.indexOf('=');
     if (eq === -1) continue;
     const key = part.slice(0, eq).trim();
-    const value = part.slice(eq + 1).trim();
+    const value = part.slice(eq + 1);
+    // `t` is the exact spelling. Trimming would accept a form that is not canonical.
     if (key === 't') timestamp = value;
-    else if (key === 'v1') candidates.push(value);
+    else if (key === 'v1') candidates.push(value.trim());
   }
   if (
     timestamp === undefined ||
