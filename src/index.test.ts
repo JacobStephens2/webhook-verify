@@ -30,6 +30,19 @@ function independentTimestampedHeader(
   return `t=${headerTimestamp},v1=${digest}`;
 }
 
+function independentTimestampedHeaderForTimestamp(
+  rawBody: string | Buffer,
+  secret: string,
+  timestamp: string,
+): string {
+  const signingBase = Buffer.concat([
+    Buffer.from(`${timestamp}.`, 'utf8'),
+    typeof rawBody === 'string' ? Buffer.from(rawBody, 'utf8') : rawBody,
+  ]);
+  const digest = createHmac('sha256', secret).update(signingBase).digest('hex');
+  return `t=${timestamp},v1=${digest}`;
+}
+
 function nonIntegerTimestampedHeaders(
   rawBody: string | Buffer,
   secret: string,
@@ -171,11 +184,73 @@ describe('signTimestamped / verifyTimestamped', () => {
     },
   );
 
-  it('keeps using the parsed numeric timestamp and the last timestamp field', () => {
+  it('uses the last timestamp field when it is canonical', () => {
     const rawBody = Buffer.from('80', 'hex');
     const header = independentTimestampedHeader(rawBody, SECRET, now)
-      .replace(`t=${now}`, 'ignored,t=0,t=1.75e9');
+      .replace(`t=${now}`, `t=0,t=${now}`);
     expect(verifyTimestamped(rawBody, header, SECRET, { nowSeconds: now })).toBe(true);
+  });
+
+  it('rejects non-canonical timestamp spellings that parse as integers', () => {
+    const spellings = [
+      '1.75e9',
+      '1750000000.0',
+      '1750000000.',
+      '+1750000000',
+      '01750000000',
+      '1750000000e0',
+      '',
+      '-0',
+      '0x10',
+      '-1e2',
+      '-0100',
+      '00',
+      '+0',
+      '0.0',
+    ];
+    for (const spelling of spellings) {
+      const timestamp = Number(spelling);
+      expect(Number.isInteger(timestamp), spelling).toBe(true);
+      const header = independentTimestampedHeader(body, SECRET, timestamp, spelling);
+      expect(verifyTimestamped(body, header, SECRET, { nowSeconds: timestamp }), spelling).toBe(false);
+      expect(verifyStripe(body, header, SECRET, { nowSeconds: timestamp }), spelling).toBe(false);
+      expect(
+        () => constructStripeEvent(body, header, SECRET, { nowSeconds: timestamp }),
+        spelling,
+      ).toThrow('Invalid Stripe signature or timestamp outside tolerance');
+    }
+
+    const earlierCanonical = independentTimestampedHeader(body, SECRET, now)
+      .replace(`t=${now}`, `t=${now},t=1.75e9`);
+    expect(verifyTimestamped(body, earlierCanonical, SECRET, { nowSeconds: now })).toBe(false);
+
+    expect(verifyTimestamped(body, independentTimestampedHeader(body, SECRET, 0), SECRET, { nowSeconds: 0 })).toBe(true);
+    expect(verifyTimestamped(body, independentTimestampedHeader(body, SECRET, 1), SECRET, { nowSeconds: 1 })).toBe(true);
+    expect(verifyTimestamped(body, independentTimestampedHeader(body, SECRET, -1), SECRET, { nowSeconds: -1 })).toBe(true);
+    expect(verifyTimestamped(body, independentTimestampedHeader(body, SECRET, -100), SECRET, { nowSeconds: -100 })).toBe(true);
+  });
+
+  it('uses the exact canonical timestamp string in the signing base', () => {
+    const rawBody = Buffer.from('{"id":"evt_exact"}', 'utf8');
+    // 2^53 + 1. Parsing it as a number rounds to a different decimal string.
+    const exact = '9007199254740993';
+    const parsed = String(Number(exact));
+    expect(Number.isInteger(Number(exact))).toBe(true);
+    expect(parsed).not.toBe(exact);
+
+    const nowSeconds = Number(exact);
+    const exactHeader = independentTimestampedHeaderForTimestamp(rawBody, SECRET, exact);
+    const parsedHeader = independentTimestampedHeader(rawBody, SECRET, nowSeconds, exact);
+
+    expect(verifyTimestamped(rawBody, exactHeader, SECRET, { nowSeconds })).toBe(true);
+    expect(verifyTimestamped(rawBody, parsedHeader, SECRET, { nowSeconds })).toBe(false);
+    expect(verifyStripe(rawBody, exactHeader, SECRET, { nowSeconds })).toBe(true);
+    expect(constructStripeEvent(rawBody, exactHeader, SECRET, { nowSeconds })).toEqual({
+      id: 'evt_exact',
+    });
+    expect(() => constructStripeEvent(rawBody, parsedHeader, SECRET, { nowSeconds })).toThrow(
+      'Invalid Stripe signature or timestamp outside tolerance',
+    );
   });
 
   it.each([

@@ -91,9 +91,10 @@ without GitHub's `sha256=` prefix.
 ## Timestamped (Stripe-style), both directions
 
 The [Timestamped signing base](./GLOSSARY.md#language) is the UTF-8 encoding
-of the existing numeric timestamp representation followed by a dot, then the
-body bytes. Buffers contribute their unmodified bytes; strings contribute
-their UTF-8 encoding. The shared private computation lives in
+of the canonical integer timestamp string followed by a dot, then the body
+bytes. A `t` value is accepted only when it is that exact string. Buffers
+contribute their unmodified bytes; strings contribute their UTF-8 encoding.
+The shared private computation lives in
 [`src/timestamped-webhook.ts`](./src/timestamped-webhook.ts).
 
 This corrects previously lossy signatures for non-UTF-8 Buffers, which were
