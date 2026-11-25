@@ -19,7 +19,7 @@ const SECRET = 'whsec_test_4f8a2b';
 function independentTimestampedHeader(
   rawBody: string | Buffer,
   secret: string,
-  timestamp: number,
+  timestamp: number | string,
   headerTimestamp = String(timestamp),
 ): string {
   const signingBase = Buffer.concat([
@@ -171,11 +171,111 @@ describe('signTimestamped / verifyTimestamped', () => {
     },
   );
 
-  it('keeps using the parsed numeric timestamp and the last timestamp field', () => {
+  it('uses the last timestamp field when it is canonical', () => {
     const rawBody = Buffer.from('80', 'hex');
     const header = independentTimestampedHeader(rawBody, SECRET, now)
-      .replace(`t=${now}`, 'ignored,t=0,t=1.75e9');
+      .replace(`t=${now}`, `t=0,t=${now}`);
     expect(verifyTimestamped(rawBody, header, SECRET, { nowSeconds: now })).toBe(true);
+  });
+
+  it('rejects non-canonical timestamp spellings that parse as integers', () => {
+    const spellings = [
+      '1.75e9',
+      '1750000000.0',
+      '1750000000.',
+      '+1750000000',
+      '01750000000',
+      '1750000000e0',
+      '',
+      '-0',
+      '0x10',
+      '-1e2',
+      '-0100',
+      '00',
+      '+0',
+      '0.0',
+    ];
+    for (const spelling of spellings) {
+      const timestamp = Number(spelling);
+      expect(Number.isInteger(timestamp), spelling).toBe(true);
+      const header = independentTimestampedHeader(body, SECRET, timestamp, spelling);
+      expect(verifyTimestamped(body, header, SECRET, { nowSeconds: timestamp }), spelling).toBe(false);
+      expect(verifyStripe(body, header, SECRET, { nowSeconds: timestamp }), spelling).toBe(false);
+      expect(
+        () => constructStripeEvent(body, header, SECRET, { nowSeconds: timestamp }),
+        spelling,
+      ).toThrow('Invalid Stripe signature or timestamp outside tolerance');
+    }
+
+    const earlierCanonical = independentTimestampedHeader(body, SECRET, now)
+      .replace(`t=${now}`, `t=${now},t=1.75e9`);
+    expect(verifyTimestamped(body, earlierCanonical, SECRET, { nowSeconds: now })).toBe(false);
+
+    expect(verifyTimestamped(body, independentTimestampedHeader(body, SECRET, 0), SECRET, { nowSeconds: 0 })).toBe(true);
+    expect(verifyTimestamped(body, independentTimestampedHeader(body, SECRET, 1), SECRET, { nowSeconds: 1 })).toBe(true);
+    expect(verifyTimestamped(body, independentTimestampedHeader(body, SECRET, -1), SECRET, { nowSeconds: -1 })).toBe(true);
+    expect(verifyTimestamped(body, independentTimestampedHeader(body, SECRET, -100), SECRET, { nowSeconds: -100 })).toBe(true);
+  });
+
+  it('uses the exact canonical timestamp string in the signing base', () => {
+    const rawBody = Buffer.from('{"id":"evt_exact"}', 'utf8');
+    // 2^53 + 1. Parsing it as a number rounds to a different decimal string.
+    const exact = '9007199254740993';
+    const parsed = String(Number(exact));
+    expect(Number.isInteger(Number(exact))).toBe(true);
+    expect(parsed).not.toBe(exact);
+
+    const nowSeconds = Number(exact);
+    const exactHeader = independentTimestampedHeader(rawBody, SECRET, exact);
+    const parsedHeader = independentTimestampedHeader(rawBody, SECRET, nowSeconds, exact);
+
+    expect(verifyTimestamped(rawBody, exactHeader, SECRET, { nowSeconds })).toBe(true);
+    expect(verifyTimestamped(rawBody, parsedHeader, SECRET, { nowSeconds })).toBe(false);
+    expect(verifyStripe(rawBody, exactHeader, SECRET, { nowSeconds })).toBe(true);
+    expect(constructStripeEvent(rawBody, exactHeader, SECRET, { nowSeconds })).toEqual({
+      id: 'evt_exact',
+    });
+    expect(() => constructStripeEvent(rawBody, parsedHeader, SECRET, { nowSeconds })).toThrow(
+      'Invalid Stripe signature or timestamp outside tolerance',
+    );
+  });
+
+  it('round-trips an integer whose default spelling is not canonical', () => {
+    const timestamp = 1e21;
+    expect(Number.isInteger(timestamp)).toBe(true);
+    const header = signTimestamped(body, SECRET, timestamp);
+    expect(
+      verifyTimestamped(body, header, SECRET, { nowSeconds: timestamp, toleranceSeconds: 0 }),
+    ).toBe(true);
+  });
+
+  it('rejects whitespace spellings that still parse as integers', () => {
+    const rawBody = '{"id":"evt_123"}';
+    const canonical = '1750000000';
+    const digest = createHmac('sha256', SECRET)
+      .update(Buffer.concat([
+        Buffer.from(`${canonical}.`, 'utf8'),
+        Buffer.from(rawBody, 'utf8'),
+      ]))
+      .digest('hex');
+    for (const spelling of [` ${canonical}`, `${canonical} `, `${canonical}\n`, `\t${canonical}`]) {
+      expect(Number.isInteger(Number(spelling)), JSON.stringify(spelling)).toBe(true);
+      expect(
+        verifyTimestamped(rawBody, `t=${spelling},v1=${digest}`, SECRET, { nowSeconds: Number(canonical) }),
+        JSON.stringify(spelling),
+      ).toBe(false);
+    }
+  });
+
+  it('signs integers with a canonical t string that verifies', () => {
+    const rawBody = 'payload';
+    const timestampSeconds = 1e21;
+    const header = signTimestamped(rawBody, SECRET, timestampSeconds);
+    const t = header.slice(2, header.indexOf(','));
+    expect(t).toMatch(/^(?:0|-?[1-9][0-9]*)$/);
+    expect(
+      verifyTimestamped(rawBody, header, SECRET, { nowSeconds: timestampSeconds, toleranceSeconds: 0 }),
+    ).toBe(true);
   });
 
   it.each([

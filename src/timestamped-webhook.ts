@@ -8,14 +8,19 @@ export interface TimestampedVerifyOptions {
   nowSeconds?: number;
 }
 
+/** `0`, or an optional leading minus, a non-zero digit, and digits. */
+function isCanonicalIntegerTimestamp(value: string): boolean {
+  return /^(?:0|-?[1-9][0-9]*)$/.test(value);
+}
+
 /** HMAC-SHA256 hex of the Timestamped signing base; see ../GLOSSARY.md. */
 function timestampedDigest(
   rawBody: string | Buffer,
   secret: string,
-  timestampSeconds: number,
+  timestamp: string,
 ): string {
   return createHmac('sha256', secret)
-    .update(`${timestampSeconds}.`, 'utf8')
+    .update(`${timestamp}.`, 'utf8')
     .update(rawBody)
     .digest('hex');
 }
@@ -34,8 +39,11 @@ export function signTimestamped(
   if (!Number.isInteger(timestampSeconds)) {
     throw new Error('timestampSeconds must be an integer');
   }
-  const signature = timestampedDigest(rawBody, secret, timestampSeconds);
-  return `t=${timestampSeconds},v1=${signature}`;
+  // String(n) is exponential from 1e21 up. The signing base needs the
+  // canonical decimal of that integer.
+  const timestamp = BigInt(timestampSeconds).toString();
+  const signature = timestampedDigest(rawBody, secret, timestamp);
+  return `t=${timestamp},v1=${signature}`;
 }
 
 type TimestampedAssessment = 'verified' | 'missing' | 'rejected';
@@ -58,20 +66,27 @@ function assessTimestamped(
   const { toleranceSeconds = 300 } = options;
   const nowSeconds = options.nowSeconds ?? Math.floor(Date.now() / 1000);
 
-  let timestamp: number | undefined;
+  let timestamp: string | undefined;
   const candidates: string[] = [];
   for (const part of header.split(',')) {
     const eq = part.indexOf('=');
     if (eq === -1) continue;
     const key = part.slice(0, eq).trim();
-    const value = part.slice(eq + 1).trim();
-    if (key === 't') timestamp = Number(value);
-    else if (key === 'v1') candidates.push(value);
+    const value = part.slice(eq + 1);
+    // `t` is the exact spelling. Trimming would accept a form that is not canonical.
+    if (key === 't') timestamp = value;
+    else if (key === 'v1') candidates.push(value.trim());
   }
-  if (timestamp === undefined || !Number.isInteger(timestamp) || candidates.length === 0) {
+  if (
+    timestamp === undefined ||
+    !isCanonicalIntegerTimestamp(timestamp) ||
+    candidates.length === 0
+  ) {
     return 'rejected';
   }
-  if (Math.abs(nowSeconds - timestamp) > toleranceSeconds) return 'rejected';
+  const timestampSeconds = Number(timestamp);
+  if (!Number.isInteger(timestampSeconds)) return 'rejected';
+  if (Math.abs(nowSeconds - timestampSeconds) > toleranceSeconds) return 'rejected';
 
   const expected = timestampedDigest(rawBody, secret, timestamp);
   return candidates.some((candidate) => safeEqual(expected, candidate)) ? 'verified' : 'rejected';
@@ -79,9 +94,9 @@ function assessTimestamped(
 
 /**
  * Timestamped dialect, receiver side. Accepts multiple `v1` entries in one
- * header (sent during key rotation); any single match passes. Rejects
- * non-integer timestamps and timestamps outside the tolerance window in either
- * direction.
+ * header (sent during key rotation); any single match passes. Rejects a `t`
+ * value that is not a canonical integer string, and timestamps outside the
+ * tolerance window in either direction.
  */
 export function verifyTimestamped(
   rawBody: string | Buffer,
